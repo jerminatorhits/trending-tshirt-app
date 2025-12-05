@@ -106,12 +106,12 @@ export default function ExpressCheckout({
             onSuccess(paymentIntent.id, finalShippingInfo)
           } else if (paymentIntent && paymentIntent.status === 'requires_action') {
             // Handle 3D Secure or other actions
-            const { error: actionError } = await stripe.confirmCardPayment(clientSecret!)
+            const { error: actionError, paymentIntent: updatedPaymentIntent } = await stripe.confirmCardPayment(clientSecret!)
             if (actionError) {
               onError(actionError.message || 'Payment authentication failed')
               setLoading(false)
-            } else if (paymentIntent.status === 'succeeded') {
-              onSuccess(paymentIntent.id, finalShippingInfo)
+            } else if (updatedPaymentIntent && updatedPaymentIntent.status === 'succeeded') {
+              onSuccess(updatedPaymentIntent.id, finalShippingInfo)
             }
           }
         }
@@ -121,6 +121,8 @@ export default function ExpressCheckout({
         setLoading(false)
       }
     })
+    // onSuccess and onError are stable callbacks from parent, don't need to be in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stripe, clientSecret, amount, orderDetails])
 
   const handleExpressPayment = () => {
@@ -161,7 +163,7 @@ export default function ExpressCheckout({
             </p>
             <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1">
               {isChrome && !isAndroid && (
-                <li>Apple Pay only works in Safari on macOS/iOS (you're using Chrome)</li>
+                <li>Apple Pay only works in Safari on macOS/iOS (you&apos;re using Chrome)</li>
               )}
               {!isChrome && !isSafari && !isAndroid && (
                 <li>Apple Pay requires Safari browser</li>

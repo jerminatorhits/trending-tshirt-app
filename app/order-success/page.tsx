@@ -55,7 +55,7 @@ function OrderSuccessContent() {
               Processing Your Order...
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Your payment was successful! We're now creating your custom T-shirt order.
+              Your payment was successful! We&apos;re now creating your custom T-shirt order.
             </p>
           </>
         ) : success ? (
@@ -65,7 +65,7 @@ function OrderSuccessContent() {
               Order Confirmed!
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Your custom T-shirt order has been placed successfully. You'll receive a confirmation email shortly.
+              Your custom T-shirt order has been placed successfully. You&apos;ll receive a confirmation email shortly.
             </p>
             <a
               href="/"
@@ -87,7 +87,7 @@ function OrderSuccessContent() {
               <p className="text-red-600 dark:text-red-400 mb-4 text-sm">{error}</p>
             )}
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Don't worry - we've received your payment and will process your order manually. You'll receive a confirmation email.
+              Don&apos;t worry - we&apos;ve received your payment and will process your order manually. You&apos;ll receive a confirmation email.
             </p>
             <a
               href="/"

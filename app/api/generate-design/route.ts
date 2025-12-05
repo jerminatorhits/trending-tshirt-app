@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
         quality: 'standard',
         n: 1,
       })
-      imageUrl = openaiResponse.data[0]?.url || ''
+      imageUrl = openaiResponse.data?.[0]?.url || ''
     } catch (error: any) {
       console.warn('OpenAI error:', error.message)
       errorMessage = error.message

@@ -13,13 +13,13 @@ export async function GET() {
       }
     )
 
-    const topics = redditResponse.data.data.children.map((post: any, index: number) => ({
-      id: `reddit-${post.data.id}`,
-      title: post.data.title,
+    const topics = redditResponse.data?.data?.children?.map((post: any, index: number) => ({
+      id: `reddit-${post.data?.id || index}`,
+      title: post.data?.title || 'Untitled',
       source: 'Reddit',
-      upvotes: post.data.ups,
-      url: `https://reddit.com${post.data.permalink}`,
-    }))
+      upvotes: post.data?.ups || 0,
+      url: `https://reddit.com${post.data?.permalink || ''}`,
+    })) || []
 
     // You can add more sources here (Facebook, Instagram, TikTok)
     // For now, we'll use Reddit as the primary source

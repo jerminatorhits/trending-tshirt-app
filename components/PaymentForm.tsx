@@ -137,7 +137,7 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
         // Note: charges property may not be available in all PaymentIntent objects
         // We'll get email from billing_details if available
         if ((paymentIntent as any).charges?.data?.[0]?.billing_details?.email) {
-          finalShippingInfo.email = (paymentIntent as any).charges.data[0].billing_details.email
+          finalShippingInfo.email = (paymentIntent as any).charges?.data?.[0]?.billing_details?.email || ''
         }
 
         // Payment succeeded - call onSuccess

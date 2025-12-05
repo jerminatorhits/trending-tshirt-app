@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
       }
     )
 
-    const orderId = orderResponse.data.result?.id
+    const orderId = orderResponse.data?.result?.id
 
     if (!orderId) {
       return NextResponse.json(

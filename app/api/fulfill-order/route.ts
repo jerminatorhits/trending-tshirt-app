@@ -3,7 +3,7 @@ import Stripe from 'stripe'
 import axios from 'axios'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-11-20.acacia',
+  apiVersion: '2023-10-16',
 })
 
 // Printful product variant IDs
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       }
     )
 
-    const orderId = orderResponse.data.result?.id
+    const orderId = orderResponse.data?.result?.id
 
     if (!orderId) {
       return NextResponse.json(

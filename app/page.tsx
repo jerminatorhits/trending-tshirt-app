@@ -79,7 +79,7 @@ export default function Home() {
             🎨 Trending T-Shirt Generator
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300">
-            AI-powered designs from what's trending right now
+            AI-powered designs from what&apos;s trending right now
           </p>
         </div>
 
