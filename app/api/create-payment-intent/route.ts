@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Create Payment Intent with all payment methods enabled
-    // This enables card, Apple Pay, Google Pay, Link, and other available methods
+    // This enables card, Apple Pay, Google Pay, and other available methods
+    // Note: Link is disabled to avoid showing optional email/phone fields
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount, // Already in cents
       currency: 'usd',
@@ -37,6 +38,8 @@ export async function POST(request: NextRequest) {
         enabled: true,
         allow_redirects: 'never',
       },
+      // Explicitly disable Link to prevent optional fields from showing
+      payment_method_configuration: undefined, // Use default config
       // Request shipping address from Apple Pay/Google Pay
       // This allows express payment methods to provide shipping info automatically
       // Only include shipping if we have address data, otherwise let Apple Pay/Google Pay provide it

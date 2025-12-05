@@ -31,7 +31,7 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
   const [quantity, setQuantity] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showShippingForm, setShowShippingForm] = useState(false)
+  const [showShippingForm, setShowShippingForm] = useState(true) // Show shipping form automatically
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [paymentIntentClientSecret, setPaymentIntentClientSecret] = useState<string | null>(null)
@@ -93,42 +93,38 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
     createPaymentIntent()
   }, [size, color.value, quantity, totalPrice, design.id, design.imageUrl, designTitle, shippingInfo])
 
-  const handleCheckout = async () => {
-    setLoading(true)
-    setError(null)
-    
-    try {
-      // First, create the product
-      const response = await fetch('/api/create-checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          designId: design.id,
-          imageUrl: design.imageUrl,
-          title: designTitle,
-          size,
-          color: color.value,
-          quantity,
-        }),
-      })
+  // Initialize checkout when component mounts
+  useEffect(() => {
+    const initializeCheckout = async () => {
+      try {
+        // Create the product/checkout session
+        const response = await fetch('/api/create-checkout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            designId: design.id,
+            imageUrl: design.imageUrl,
+            title: designTitle,
+            size,
+            color: color.value,
+            quantity,
+          }),
+        })
 
-      const data = await response.json()
-      
-      if (data.success) {
-        // Show shipping form (users can skip this if using Apple Pay/Google Pay)
-        setShowShippingForm(true)
-      } else {
-        setError(data.error || 'Failed to create checkout. Please try again.')
+        const data = await response.json()
+        
+        if (!data.success) {
+          console.error('Failed to initialize checkout:', data.error)
+        }
+      } catch (err) {
+        console.error('Error initializing checkout:', err)
       }
-    } catch (err) {
-      setError('An error occurred. Please try again.')
-      console.error('Checkout error:', err)
-    } finally {
-      setLoading(false)
     }
-  }
+
+    initializeCheckout()
+  }, [design.id, design.imageUrl, designTitle, size, color.value, quantity])
 
   const handleCompleteOrder = async () => {
     // For express payment methods (Apple Pay, Google Pay), shipping info will come from the payment method
@@ -170,24 +166,34 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
       
       if (data.success) {
         setPaymentSuccess(true)
+        setLoading(false)
         // Redirect to success page after a short delay
         setTimeout(() => {
           window.location.href = '/order-success?payment_intent=' + paymentIntentId
         }, 2000)
       } else {
-        setError(data.error || 'Payment succeeded but order fulfillment failed. Please contact support.')
+        const errorMsg = data.error || 'Payment succeeded but order fulfillment failed. Please contact support.'
+        setError(errorMsg)
         setLoading(false)
+        // Also call handlePaymentError to reset PaymentForm's loading state
+        handlePaymentError(errorMsg)
+        console.error('Fulfillment error:', errorMsg)
       }
-    } catch (err) {
-      setError('Payment succeeded but order fulfillment failed. Please contact support.')
+    } catch (err: any) {
+      const errorMsg = err.message || 'Payment succeeded but order fulfillment failed. Please contact support.'
+      setError(errorMsg)
       console.error('Fulfillment error:', err)
       setLoading(false)
+      // Also call handlePaymentError to reset PaymentForm's loading state
+      handlePaymentError(errorMsg)
     }
   }
 
   const handlePaymentError = (errorMsg: string) => {
     setError(errorMsg)
     setLoading(false)
+    // Also reset payment form if it's showing
+    // The PaymentForm will reset its own loading state when onError is called
   }
 
   return (
@@ -398,6 +404,20 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
                 💡 Using Apple Pay or Google Pay? Your shipping address will be automatically filled from your payment method!
               </p>
             )}
+            {/* Show error prominently if it exists */}
+            {error && (
+              <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg">
+                <div className="flex items-start">
+                  <svg className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-semibold text-red-800 dark:text-red-200 mb-1">Order Fulfillment Error</p>
+                    <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
             <PaymentForm
               amount={parseFloat(totalPrice)}
               onSuccess={handlePaymentSuccess}
@@ -419,7 +439,7 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
         {!showPaymentForm && (
           <div className="space-y-3">
             <button
-              onClick={showShippingForm ? handleCompleteOrder : handleCheckout}
+              onClick={handleCompleteOrder}
               disabled={loading}
               className="w-full px-6 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold text-lg shadow-lg"
             >
@@ -431,10 +451,8 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
                   </svg>
                   Processing...
                 </span>
-              ) : showShippingForm ? (
-                '💳 Continue to Payment'
               ) : (
-                '💳 Proceed to Checkout'
+                '💳 Continue to Payment'
               )}
             </button>
           </div>

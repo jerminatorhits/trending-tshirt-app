@@ -49,6 +49,14 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
   const elements = useElements()
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  
+  // Reset loading when onError is called (for fulfillment failures)
+  // This ensures the button becomes clickable again
+  const originalOnError = onError
+  const wrappedOnError = (error: string) => {
+    setLoading(false) // Reset loading state
+    originalOnError(error)
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -61,29 +69,40 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
     setErrorMessage(null)
 
     try {
+      // First, submit the elements to validate the form
+      // This must be called before confirmPayment()
+      const { error: submitError } = await elements.submit()
+      
+      if (submitError) {
+        setErrorMessage(submitError.message || 'Form validation failed')
+        onError(submitError.message || 'Form validation failed')
+        setLoading(false)
+        return
+      }
+
       // Confirm payment using the existing clientSecret
       // For express payment methods (Apple Pay, Google Pay), shipping info will come from the payment method
       // For regular card payments, use the provided shipping info if available
       const confirmParams: any = {
         return_url: `${window.location.origin}/order-success`,
-      }
-
-      // Only add billing details if we have shipping info (for regular card payments)
-      // Express payment methods will provide this automatically
-      if (shippingInfo.name && shippingInfo.email && shippingInfo.address) {
-        confirmParams.payment_method_data = {
+        payment_method_data: {
           billing_details: {
-            name: shippingInfo.name,
-            email: shippingInfo.email,
-            address: {
-              line1: shippingInfo.address,
-              city: shippingInfo.city,
-              state: shippingInfo.state,
-              postal_code: shippingInfo.zip,
-              country: shippingInfo.country,
-            },
+            // Provide empty values for fields set to 'never' to avoid errors
+            phone: null,
+            email: shippingInfo.email || null,
+            // Only include address if we have shipping info
+            ...(shippingInfo.name && shippingInfo.address ? {
+              name: shippingInfo.name,
+              address: {
+                line1: shippingInfo.address,
+                city: shippingInfo.city,
+                state: shippingInfo.state,
+                postal_code: shippingInfo.zip,
+                country: shippingInfo.country,
+              },
+            } : {}),
           },
-        }
+        },
       }
 
       const { error, paymentIntent } = await stripe.confirmPayment({
@@ -95,7 +114,7 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
 
       if (error) {
         setErrorMessage(error.message || 'Payment failed')
-        onError(error.message || 'Payment failed')
+        wrappedOnError(error.message || 'Payment failed')
         setLoading(false)
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
         // Extract shipping info from payment intent if available (from Apple Pay/Google Pay)
@@ -114,21 +133,31 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
           }
         }
 
-        // Get email from payment intent charges if available
-        if (paymentIntent.charges?.data?.[0]?.billing_details?.email) {
-          finalShippingInfo.email = paymentIntent.charges.data[0].billing_details.email
+        // Get email from payment intent if available
+        // Note: charges property may not be available in all PaymentIntent objects
+        // We'll get email from billing_details if available
+        if ((paymentIntent as any).charges?.data?.[0]?.billing_details?.email) {
+          finalShippingInfo.email = (paymentIntent as any).charges.data[0].billing_details.email
         }
 
+        // Payment succeeded - call onSuccess
+        // Reset loading state here since payment is complete
+        // Fulfillment happens separately in the parent component
+        setLoading(false)
         onSuccess(paymentIntent.id, finalShippingInfo)
       } else {
         setLoading(false)
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred')
-      onError(err.message || 'An error occurred')
+      wrappedOnError(err.message || 'An error occurred')
       setLoading(false)
     }
   }
+  
+  // Also reset loading when fulfillment fails (called from parent via onError)
+  // We need to listen for when the parent's error state changes
+  // For now, we'll handle it by ensuring onError always resets loading
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -139,9 +168,17 @@ function CheckoutForm({ amount, onSuccess, onError, shippingInfo, orderDetails, 
               type: 'tabs',
               defaultCollapsed: false,
             },
+            // Hide optional fields (email, phone) to reduce noise
+            // Note: We must provide these in confirmParams even when set to 'never'
+            fields: {
+              billingDetails: {
+                email: 'never',
+                phone: 'never',
+                address: 'auto',
+              },
+            },
             // Payment methods are automatically enabled via automatic_payment_methods in the PaymentIntent
-            // Apple Pay, Google Pay, Link, and other express payment methods will appear automatically
-            // at the top of the form when available on the customer's device and browser
+            // Apple Pay, Google Pay will appear automatically when available
             // Shipping address will be automatically requested from Apple Pay/Google Pay
             // when the PaymentIntent has shipping configured (which we do in create-payment-intent)
             // Make sure these payment methods are enabled in your Stripe Dashboard:

@@ -148,12 +148,40 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('Error fulfilling order:', error)
+    console.error('Error response data:', error.response?.data)
+    
+    // Extract error message from Printful API response
+    let errorMessage = 'Failed to fulfill order'
+    
+    if (error.response?.data) {
+      const errorData = error.response.data
+      
+      // Printful returns errors in different formats
+      // Check for result field first (common format: { code: 400, result: "error message" })
+      if (errorData.result && typeof errorData.result === 'string') {
+        errorMessage = errorData.result
+      } else if (errorData.error) {
+        // Sometimes error is an object with a message
+        if (typeof errorData.error === 'string') {
+          errorMessage = errorData.error
+        } else if (errorData.error.message) {
+          errorMessage = errorData.error.message
+        }
+      } else if (errorData.message) {
+        errorMessage = errorData.message
+      } else if (errorData.result?.message) {
+        errorMessage = errorData.result.message
+      }
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    
     return NextResponse.json(
       {
         success: false,
-        error: error.response?.data?.result?.message || error.message || 'Failed to fulfill order',
+        error: errorMessage,
       },
-      { status: 500 }
+      { status: error.response?.status || 500 }
     )
   }
 }
