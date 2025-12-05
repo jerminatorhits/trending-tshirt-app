@@ -1,0 +1,458 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { GeneratedDesign } from '@/app/page'
+import PaymentForm from './PaymentForm'
+import ExpressCheckout from './ExpressCheckout'
+import { Elements } from '@stripe/react-stripe-js'
+import { loadStripe } from '@stripe/stripe-js'
+
+const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 
+  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) 
+  : null
+
+interface CheckoutProps {
+  design: GeneratedDesign
+  designTitle: string
+}
+
+const SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']
+const COLORS = [
+  { name: 'White', value: 'white', hex: '#FFFFFF' },
+  { name: 'Black', value: 'black', hex: '#000000' },
+  { name: 'Navy', value: 'navy', hex: '#1E3A5F' },
+  { name: 'Gray', value: 'gray', hex: '#808080' },
+  { name: 'Red', value: 'red', hex: '#DC2626' },
+]
+
+export default function Checkout({ design, designTitle }: CheckoutProps) {
+  const [size, setSize] = useState('M')
+  const [color, setColor] = useState(COLORS[0])
+  const [quantity, setQuantity] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [showShippingForm, setShowShippingForm] = useState(false)
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [paymentIntentClientSecret, setPaymentIntentClientSecret] = useState<string | null>(null)
+  const [shippingInfo, setShippingInfo] = useState({
+    name: '',
+    email: '',
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: 'US',
+  })
+
+  // Pricing with margin
+  const baseCost = 12.00 // Your cost from Printful
+  const markup = 1.5 // 50% markup
+  const basePrice = baseCost * markup // Your selling price
+  const shippingCost = 4.99
+  const subtotal = basePrice * quantity
+  const totalPrice = (subtotal + shippingCost).toFixed(2)
+
+  // Create payment intent early so express checkout buttons can appear
+  useEffect(() => {
+    const createPaymentIntent = async () => {
+      try {
+        const response = await fetch('/api/create-payment-intent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            amount: Math.round(parseFloat(totalPrice) * 100),
+            shipping: shippingInfo,
+            orderDetails: {
+              designId: design.id,
+              imageUrl: design.imageUrl,
+              title: designTitle,
+              size,
+              color: color.value,
+              quantity,
+            },
+          }),
+        })
+
+        const data = await response.json()
+        
+        if (data.clientSecret) {
+          console.log('Payment intent created successfully for express checkout')
+          setPaymentIntentClientSecret(data.clientSecret)
+        } else {
+          console.error('No clientSecret in response:', data)
+        }
+      } catch (err) {
+        console.error('Failed to create payment intent for express checkout:', err)
+      }
+    }
+
+    // Create payment intent when component mounts or when order details change
+    createPaymentIntent()
+  }, [size, color.value, quantity, totalPrice, design.id, design.imageUrl, designTitle, shippingInfo])
+
+  const handleCheckout = async () => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      // First, create the product
+      const response = await fetch('/api/create-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          designId: design.id,
+          imageUrl: design.imageUrl,
+          title: designTitle,
+          size,
+          color: color.value,
+          quantity,
+        }),
+      })
+
+      const data = await response.json()
+      
+      if (data.success) {
+        // Show shipping form (users can skip this if using Apple Pay/Google Pay)
+        setShowShippingForm(true)
+      } else {
+        setError(data.error || 'Failed to create checkout. Please try again.')
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.')
+      console.error('Checkout error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCompleteOrder = async () => {
+    // For express payment methods (Apple Pay, Google Pay), shipping info will come from the payment method
+    // For regular card payments, we need shipping info
+    // We'll allow proceeding even if shipping info is incomplete - it will be filled from payment method if available
+    // Show payment form
+    console.log('Showing payment form...')
+    setShowPaymentForm(true)
+    setError(null)
+  }
+
+  const handlePaymentSuccess = async (paymentIntentId: string, paymentShippingInfo?: any) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Use shipping info from payment method (Apple Pay/Google Pay) if available, otherwise use form data
+      const finalShippingInfo = paymentShippingInfo || shippingInfo
+
+      // Fulfill the order
+      const response = await fetch('/api/fulfill-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          paymentIntentId,
+          designId: design.id,
+          imageUrl: design.imageUrl,
+          title: designTitle,
+          size,
+          color: color.value,
+          quantity,
+          shipping: finalShippingInfo,
+        }),
+      })
+
+      const data = await response.json()
+      
+      if (data.success) {
+        setPaymentSuccess(true)
+        // Redirect to success page after a short delay
+        setTimeout(() => {
+          window.location.href = '/order-success?payment_intent=' + paymentIntentId
+        }, 2000)
+      } else {
+        setError(data.error || 'Payment succeeded but order fulfillment failed. Please contact support.')
+        setLoading(false)
+      }
+    } catch (err) {
+      setError('Payment succeeded but order fulfillment failed. Please contact support.')
+      console.error('Fulfillment error:', err)
+      setLoading(false)
+    }
+  }
+
+  const handlePaymentError = (errorMsg: string) => {
+    setError(errorMsg)
+    setLoading(false)
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+      <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+        🛒 Checkout
+      </h2>
+
+      <div className="space-y-6">
+        {/* Size Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Size
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+            {SIZES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setSize(s)}
+                className={`px-4 py-2 rounded-lg border-2 transition-colors ${
+                  size === s
+                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-semibold'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Color Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Color
+          </label>
+          <div className="flex gap-3">
+            {COLORS.map((c) => (
+              <button
+                key={c.value}
+                onClick={() => setColor(c)}
+                className={`w-12 h-12 rounded-full border-4 transition-all ${
+                  color.value === c.value
+                    ? 'border-blue-600 scale-110 shadow-lg'
+                    : 'border-gray-300 dark:border-gray-600 hover:scale-105'
+                }`}
+                style={{ backgroundColor: c.hex }}
+                title={c.name}
+              />
+            ))}
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+            Selected: {color.name}
+          </p>
+        </div>
+
+        {/* Quantity Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Quantity
+          </label>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setQuantity(Math.max(1, quantity - 1))}
+              disabled={quantity <= 1}
+              className="w-10 h-10 rounded-lg border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              −
+            </button>
+            <span className="text-xl font-semibold text-gray-900 dark:text-white w-12 text-center">
+              {quantity}
+            </span>
+            <button
+              onClick={() => setQuantity(quantity + 1)}
+              disabled={quantity >= 10}
+              className="w-10 h-10 rounded-lg border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Price Summary */}
+        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-600 dark:text-gray-400">Price per item</span>
+            <span className="text-gray-900 dark:text-white font-semibold">${basePrice.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-600 dark:text-gray-400">Quantity</span>
+            <span className="text-gray-900 dark:text-white">{quantity}</span>
+          </div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
+            <span className="text-gray-900 dark:text-white">${subtotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-600 dark:text-gray-400">Shipping</span>
+            <span className="text-gray-900 dark:text-white">${shippingCost.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center text-lg font-bold pt-2 border-t border-gray-200 dark:border-gray-700">
+            <span className="text-gray-900 dark:text-white">Total</span>
+            <span className="text-blue-600 dark:text-blue-400">${totalPrice}</span>
+          </div>
+        </div>
+
+        {/* Express Checkout - Right after price summary, before proceed button */}
+        {paymentIntentClientSecret && stripePromise ? (
+          <Elements stripe={stripePromise} options={{ clientSecret: paymentIntentClientSecret }}>
+            <ExpressCheckout
+              amount={parseFloat(totalPrice)}
+              onSuccess={handlePaymentSuccess}
+              onError={handlePaymentError}
+              orderDetails={{
+                designId: design.id,
+                imageUrl: design.imageUrl,
+                title: designTitle,
+                size,
+                color: color.value,
+                quantity,
+              }}
+              clientSecret={paymentIntentClientSecret}
+            />
+          </Elements>
+        ) : (
+          <div className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            {!paymentIntentClientSecret && 'Loading payment options...'}
+            {!stripePromise && 'Stripe not configured'}
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+          </div>
+        )}
+
+        {/* Shipping Form */}
+        {showShippingForm && (
+          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white uppercase tracking-wide text-sm mb-4">
+              Shipping Information
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={shippingInfo.name}
+                onChange={(e) => setShippingInfo({...shippingInfo, name: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={shippingInfo.email}
+                onChange={(e) => setShippingInfo({...shippingInfo, email: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <input
+                type="text"
+                placeholder="Address"
+                value={shippingInfo.address}
+                onChange={(e) => setShippingInfo({...shippingInfo, address: e.target.value})}
+                className="col-span-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <input
+                type="text"
+                placeholder="City"
+                value={shippingInfo.city}
+                onChange={(e) => setShippingInfo({...shippingInfo, city: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <input
+                type="text"
+                placeholder="State"
+                value={shippingInfo.state}
+                onChange={(e) => setShippingInfo({...shippingInfo, state: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <input
+                type="text"
+                placeholder="ZIP Code"
+                value={shippingInfo.zip}
+                onChange={(e) => setShippingInfo({...shippingInfo, zip: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <select
+                value={shippingInfo.country}
+                onChange={(e) => setShippingInfo({...shippingInfo, country: e.target.value})}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              >
+                <option value="US">United States</option>
+                <option value="CA">Canada</option>
+                <option value="GB">United Kingdom</option>
+                <option value="AU">Australia</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Form */}
+        {showPaymentForm && !paymentSuccess && (
+          <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Payment Information</h3>
+            {!showShippingForm && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                💡 Using Apple Pay or Google Pay? Your shipping address will be automatically filled from your payment method!
+              </p>
+            )}
+            <PaymentForm
+              amount={parseFloat(totalPrice)}
+              onSuccess={handlePaymentSuccess}
+              onError={handlePaymentError}
+              shippingInfo={shippingInfo}
+              orderDetails={{
+                designId: design.id,
+                imageUrl: design.imageUrl,
+                title: designTitle,
+                size,
+                color: color.value,
+                quantity,
+              }}
+            />
+          </div>
+        )}
+
+        {/* Checkout Button */}
+        {!showPaymentForm && (
+          <div className="space-y-3">
+            <button
+              onClick={showShippingForm ? handleCompleteOrder : handleCheckout}
+              disabled={loading}
+              className="w-full px-6 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold text-lg shadow-lg"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </span>
+              ) : showShippingForm ? (
+                '💳 Continue to Payment'
+              ) : (
+                '💳 Proceed to Checkout'
+              )}
+            </button>
+          </div>
+        )}
+
+        {paymentSuccess && (
+          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+            <p className="text-sm text-green-800 dark:text-green-200 text-center">
+              ✓ Payment successful! Processing your order...
+            </p>
+          </div>
+        )}
+
+        <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+          Secure payment powered by Stripe. Your order will be fulfilled by Printful.
+        </p>
+      </div>
+    </div>
+  )
+}
+

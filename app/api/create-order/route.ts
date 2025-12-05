@@ -1,0 +1,249 @@
+import { NextRequest, NextResponse } from 'next/server'
+import axios from 'axios'
+import FormData from 'form-data'
+
+// Printful product variant IDs for Gildan 64000 Unisex Softstyle T-Shirt
+const VARIANT_MAP: Record<string, Record<string, number>> = {
+  white: {
+    XS: 4011,
+    S: 4012,
+    M: 4013,
+    L: 4014,
+    XL: 4015,
+    '2XL': 4016,
+    '3XL': 4017,
+  },
+  black: {
+    XS: 4018,
+    S: 4019,
+    M: 4020,
+    L: 4021,
+    XL: 4022,
+    '2XL': 4023,
+    '3XL': 4024,
+  },
+  navy: {
+    XS: 4025,
+    S: 4026,
+    M: 4027,
+    L: 4028,
+    XL: 4029,
+    '2XL': 4030,
+    '3XL': 4031,
+  },
+  gray: {
+    XS: 4032,
+    S: 4033,
+    M: 4034,
+    L: 4035,
+    XL: 4036,
+    '2XL': 4037,
+    '3XL': 4038,
+  },
+  red: {
+    XS: 4039,
+    S: 4040,
+    M: 4041,
+    L: 4042,
+    XL: 4043,
+    '2XL': 4044,
+    '3XL': 4045,
+  },
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { designId, imageUrl, title, size, color, quantity, shipping } = await request.json()
+
+    if (!designId || !imageUrl || !title || !size || !color || !quantity || !shipping) {
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      )
+    }
+
+    const printfulApiKey = process.env.PRINTFUL_API_KEY
+
+    if (!printfulApiKey) {
+      return NextResponse.json({
+        success: true,
+        orderUrl: '#',
+        message: 'Printful API key not configured. In production, this would create a real order.',
+        orderId: `demo-order-${Date.now()}`,
+      })
+    }
+
+    // Get variant ID
+    const variantId = VARIANT_MAP[color]?.[size]
+    
+    if (!variantId) {
+      return NextResponse.json(
+        { error: `Variant not found for size ${size} and color ${color}` },
+        { status: 400 }
+      )
+    }
+
+    // Handle base64 images - Printful requires HTTP URLs for orders
+    const isDataUrl = imageUrl.startsWith('data:')
+    let finalImageUrl = imageUrl
+    
+    // If it's a base64 image, upload it to a hosting service first
+    if (isDataUrl) {
+      try {
+        // Upload base64 image to get an HTTP URL
+        const uploadResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/upload-image`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ imageUrl }),
+        })
+
+        const uploadData = await uploadResponse.json()
+        
+        if (uploadData.success && uploadData.imageUrl) {
+          finalImageUrl = uploadData.imageUrl
+          console.log('Image uploaded to hosting service:', finalImageUrl)
+        } else {
+          // Upload failed - return error with helpful message
+          const errorMsg = uploadData?.error || 'Failed to upload image to hosting service'
+          return NextResponse.json(
+            {
+              success: false,
+              error: errorMsg + '. Make sure IMGBB_API_KEY is set in your .env file. Get a free key at https://api.imgbb.com/',
+              needsImageHosting: true,
+              solution: 'Get free ImgBB API key from https://api.imgbb.com/ and add to .env',
+            },
+            { status: 400 }
+          )
+        }
+      } catch (uploadError: any) {
+        console.error('Error uploading image:', uploadError)
+        
+        // Extract error message
+        const errorMsg = uploadError.message || 'Failed to upload image to hosting service'
+        
+        return NextResponse.json(
+          {
+            success: false,
+            error: errorMsg + '. Make sure IMGBB_API_KEY is set in your .env file. Get a free key at https://api.imgbb.com/',
+            needsImageHosting: true,
+            solution: 'Get free ImgBB API key from https://api.imgbb.com/ and add to .env',
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Create order directly in Printful
+    // Printful requires files to be an array, and each file needs proper structure
+    const orderPayload: any = {
+      recipient: {
+        name: shipping.name,
+        email: shipping.email,
+        address1: shipping.address,
+        city: shipping.city,
+        state_code: shipping.state,
+        country_code: shipping.country,
+        zip: shipping.zip,
+      },
+      items: [
+        {
+          variant_id: variantId,
+          quantity: quantity,
+        },
+      ],
+    }
+
+    // Add files array to the item - Printful requires this format
+    if (finalImageUrl && finalImageUrl.startsWith('http')) {
+      orderPayload.items[0].files = [
+        {
+          type: 'front',
+          url: finalImageUrl,
+          position: {
+            area_width: 1800,
+            area_height: 2400,
+            width: 1800,
+            height: 1800,
+            top: 300,
+            left: 0,
+          },
+        },
+      ]
+    } else {
+      // If we still have base64, we can't proceed
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Image URL is not valid. Please try generating a new design with OpenAI (DALL-E) which provides direct URLs.',
+          needsImageHosting: true,
+        },
+        { status: 400 }
+      )
+    }
+
+    console.log('Creating order with payload:', JSON.stringify(orderPayload, null, 2))
+
+    const orderResponse = await axios.post(
+      'https://api.printful.com/orders',
+      orderPayload,
+      {
+        headers: {
+          Authorization: `Bearer ${printfulApiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    )
+
+    const orderId = orderResponse.data.result?.id
+
+    if (!orderId) {
+      return NextResponse.json(
+        { error: 'Failed to create order in Printful' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      orderId,
+      orderUrl: `https://www.printful.com/dashboard/orders/${orderId}`,
+      message: 'Order created successfully! You will receive a confirmation email.',
+    })
+  } catch (error: any) {
+    console.error('Error creating order:', error)
+    
+    if (!process.env.PRINTFUL_API_KEY) {
+      return NextResponse.json({
+        success: true,
+        orderUrl: '#',
+        message: 'Printful API key not configured. Configure it to enable real orders.',
+        orderId: `demo-${Date.now()}`,
+      })
+    }
+
+    // Better error handling
+    const errorMessage = error.response?.data?.result?.message || 
+                        error.response?.data?.error?.message ||
+                        error.response?.data?.error ||
+                        error.message || 
+                        'Failed to create order'
+    
+    console.error('Order creation error details:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: errorMessage,
+    })
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: errorMessage,
+        needsImageHosting: errorMessage.includes('file') || errorMessage.includes('image'),
+      },
+      { status: error.response?.status || 500 }
+    )
+  }
+}
+
