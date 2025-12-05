@@ -37,7 +37,12 @@ export default function ExpressCheckout({
       return
     }
 
-    console.log('ExpressCheckout: Creating payment request...')
+    console.log('ExpressCheckout: Creating payment request...', {
+      amount,
+      currency: 'usd',
+      clientSecret: clientSecret.substring(0, 20) + '...',
+    })
+    
     const pr = stripe.paymentRequest({
       country: 'US',
       currency: 'usd',
@@ -53,6 +58,13 @@ export default function ExpressCheckout({
     // Check if payment methods are available
     pr.canMakePayment().then((result: any) => {
       console.log('ExpressCheckout: canMakePayment result', result)
+      console.log('ExpressCheckout: Browser info', {
+        userAgent: navigator.userAgent,
+        isSafari: /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
+        isChrome: /chrome/i.test(navigator.userAgent),
+        isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent),
+        isMacOS: /Macintosh|MacIntel|MacPPC|Mac68K/.test(navigator.userAgent),
+      })
       if (result) {
         setPaymentRequest(pr)
         setCanMakePayment(true)
@@ -62,7 +74,12 @@ export default function ExpressCheckout({
         })
         console.log('ExpressCheckout: Payment methods available', { applePay: result.applePay, googlePay: result.googlePay })
       } else {
-        console.log('ExpressCheckout: No payment methods available')
+        console.log('ExpressCheckout: No payment methods available - result was:', result)
+        console.log('ExpressCheckout: This might be because:')
+        console.log('  1. Apple Pay is not enabled in device settings (iOS/macOS)')
+        console.log('  2. Payment methods are not enabled in Stripe Dashboard')
+        console.log('  3. Browser does not support Payment Request API')
+        console.log('  4. Site is not using HTTPS (required for production)')
       }
     }).catch((error) => {
       console.error('ExpressCheckout: Error checking payment methods', error)
@@ -140,45 +157,37 @@ export default function ExpressCheckout({
     )
   }
 
-  // Show a message if payment methods aren't available, but still show the section
-  // This helps users understand why they don't see Apple Pay/Google Pay
+  // Show a message if payment methods aren't available
+  // Always show the section so users know express checkout is being checked
   if (!canMakePayment || !paymentRequest) {
     // Check if we're in a browser that might support it
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
     const isChrome = /chrome/i.test(navigator.userAgent) && !/edg/i.test(navigator.userAgent)
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
     const isAndroid = /android/i.test(navigator.userAgent)
+    const isMacOS = /Macintosh|MacIntel|MacPPC|Mac68K/.test(navigator.userAgent)
     
-    // Don't show anything if payment methods aren't available
-    // But we could show a helpful message in development
-    if (process.env.NODE_ENV === 'development') {
-      return (
-        <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase mb-4 tracking-wide">
-            Express Checkout
-          </h3>
-          <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-            <p className="text-xs text-yellow-800 dark:text-yellow-200 mb-2">
-              <strong>Express payment methods not available:</strong>
-            </p>
-            <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1">
-              {isChrome && !isAndroid && (
-                <li>Apple Pay only works in Safari on macOS/iOS (you&apos;re using Chrome)</li>
-              )}
-              {!isChrome && !isSafari && !isAndroid && (
-                <li>Apple Pay requires Safari browser</li>
-              )}
-              {!isAndroid && !isChrome && (
-                <li>Google Pay requires Chrome browser</li>
-              )}
-              <li>Make sure Apple Pay/Google Pay are enabled in your Stripe Dashboard</li>
-              <li>In production, the site must use HTTPS</li>
-            </ul>
-          </div>
+    // Show a helpful message explaining why express payment methods might not be available
+    return (
+      <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase mb-4 tracking-wide">
+          Express Checkout
+        </h3>
+        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <p className="text-xs text-blue-800 dark:text-blue-200 mb-2">
+            <strong>Express payment methods loading...</strong>
+          </p>
+          <p className="text-xs text-blue-700 dark:text-blue-300">
+            {isSafari && (isIOS || isMacOS) 
+              ? 'Apple Pay should be available in Safari. Make sure it&apos;s enabled in your device settings and Stripe Dashboard.'
+              : isChrome
+              ? 'Google Pay should be available in Chrome. Apple Pay requires Safari on macOS/iOS.'
+              : 'Express payment methods require Safari (for Apple Pay) or Chrome (for Google Pay).'
+            }
+          </p>
         </div>
-      )
-    }
-    return null
+      </div>
+    )
   }
 
   return (

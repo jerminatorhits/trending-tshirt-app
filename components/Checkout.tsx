@@ -90,8 +90,9 @@ export default function Checkout({ design, designTitle }: CheckoutProps) {
     }
 
     // Create payment intent when component mounts or when order details change
+    // Note: We don't include shippingInfo in deps to avoid recreating on every keystroke
     createPaymentIntent()
-  }, [size, color.value, quantity, totalPrice, design.id, design.imageUrl, designTitle, shippingInfo])
+  }, [size, color.value, quantity, totalPrice, design.id, design.imageUrl, designTitle])
 
   // Initialize checkout when component mounts
   useEffect(() => {
